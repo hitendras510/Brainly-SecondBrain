@@ -108,6 +108,13 @@ app.get("/api/v1/content",userMiddleware, async (req, res) => {
 });
 
 app.delete("/api/v1/content", async (req, res) => {
+  const contentId = req.body.contentId; //check does he own the content
+  const content = await ContentModel.deleteMany({
+    contentId,
+    //@ts-ignore
+    userId: userId,
+  });
+
   res.json({ message: "Content deleted" });
 });
 
