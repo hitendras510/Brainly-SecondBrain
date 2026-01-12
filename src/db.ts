@@ -1,14 +1,8 @@
-const mongoose = require("mongoose");
-mongoose.connect(
-    process.env.MONGODB_URI
-);
-mongoose.connection.on("error",(err: any)=>{
-    console.log(err);
-});
-mongoose.connection.on("open",()=>{
-    console.log("Connected to MONGODB");
-});
+import {model,Schema} from "mongoose";
 
-const Schema = mongoose.Schema;
-const objectId = mongoose.Schema.Types.objectId;
+const UserSchema = new Schema({
+    username:{type: String,required:true,unique:true},
+    password:{type: String,required:true},
+})
 
+export const UserModel = model('User',UserSchema);
