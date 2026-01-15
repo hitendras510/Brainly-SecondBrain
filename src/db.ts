@@ -21,10 +21,15 @@ const UserSchema = new Schema({
 
 export const UserModel = model("User", UserSchema);
 
-const contentSchema = new Schema({
-  title: String,
-  link: String,
-  tags:[{type: mongoose.Types.ObjectId, ref: 'Tag'}],
-  userId: {type:mongoose.Types.ObjectId, ref:'User', required: true}
-})
+const contentSchema = new mongoose.Schema({
+  link: { type: String },
+  title: { type: String },
+  type: { type: String },
+  tags: [{ type: mongoose.Schema.Types.ObjectId, ref: "Tag" }],
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+
+  // ✅ ADD THIS
+  shareLink: { type: String, unique: true, sparse: true },
+});
+
 export const ContentModel = model("Content",contentSchema); //"Content" -> name of the model

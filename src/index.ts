@@ -1,130 +1,169 @@
 import dotenv from "dotenv";
 dotenv.config();
+
 import express from "express";
-import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
-import { UserModel } from "./db.js";
-import { ContentModel } from "./db.js";
-import {userMiddleware} from "./middleware.js";
-import { z } from "zod";
 import bcrypt from "bcrypt";
+import { z } from "zod";
+
+import { UserModel, ContentModel } from "./db.js";
+import { userMiddleware } from "./middleware.js";
 import { JWT_PASSWORD } from "./config.js";
 
 const app = express();
 app.use(express.json());
 
-// zod validation
 const userSchema = z.object({
-  username: z.string().min(3, "Username must be at least 3 characters"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
+  username: z.string().min(3),
+  password: z.string().min(6),
 });
 
+/* ================== AUTH ================== */
+
+// SIGNUP
 app.post("/api/v1/signup", async (req, res) => {
-  try {
-    const result = userSchema.safeParse(req.body);
-
-    if (!result.success) {
-      return res.status(400).json({
-        message: "Invalid input",
-        errors: result.error.issues,
-      });
-    }
-
-    const { username, password } = result.data;
-
-    const existingUser = await UserModel.findOne({ username });
-    if (existingUser) {
-      return res.status(400).json({
-        message: "User already exists",
-      });
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    await UserModel.create({
-      username: username,
-      password: hashedPassword,
-    });
-
-    return res.status(201).json({
-      message: "User created successfully",
-    });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({
-      message: "Internal server error",
-    });
+  const result = userSchema.safeParse(req.body);
+  if (!result.success) {
+    return res.status(400).json({ message: "Invalid input" });
   }
-});
 
-app.post("/api/v1/signin", async (req, res) => {
-  const username = req.body.username;
-  const password = req.body.password;
+  const { username, password } = result.data;
 
-  const existingUser = await UserModel.findOne({
+  const existingUser = await UserModel.findOne({ username });
+  if (existingUser) {
+    return res.status(400).json({ message: "User already exists" });
+  }
+
+  const hashedPassword = await bcrypt.hash(password, 10);
+
+  await UserModel.create({
     username,
-    password
+    password: hashedPassword,
   });
-  if(existingUser){
-    const token = jwt.sign({
-      id: existingUser._id
-    },JWT_PASSWORD);
 
-    res.json({
-      token
-    })
-  }else{
-    res.status(403).json({
-      message: "Incorrect credenetials"
-    })
-  }
-  res.json({ message: "Signin route" });
+  return res.json({ message: "User created" });
 });
 
+// SIGNIN
+app.post("/api/v1/signin", async (req, res) => {
+  const { username, password } = req.body;
 
-app.post("/api/v1/content",userMiddleware, async (req, res) => {
-  const {link,type} = req.body;
+  const user = await UserModel.findOne({ username });
+  if (!user) {
+    return res.status(403).json({ message: "Invalid credentials" });
+  }
+
+  const isValid = await bcrypt.compare(password, user.password);
+  if (!isValid) {
+    return res.status(403).json({ message: "Invalid credentials" });
+  }
+
+  const token = jwt.sign({ id: user._id }, JWT_PASSWORD);
+
+  return res.json({ token });
+});
+
+/* ================== CONTENT ================== */
+
+// CREATE
+app.post("/api/v1/content", userMiddleware, async (req, res) => {
+  const { link, type } = req.body;
+
   await ContentModel.create({
     link,
-    //@ts-ignore
     type,
-    //@ts-ignore
     userId: req.userId,
     tags: [],
   });
+
   return res.json({ message: "Content created" });
 });
 
-app.get("/api/v1/content",userMiddleware, async (req, res) => {
-  //@ts-ignore
-  const userId = req.userId;
-  const content = await ContentModel.find({
-    userId: userId
-  }).populate("userId","username") //bring userId (by whom it was created), {select}
-  return res.json({
-   content,
-  message: "Content fetched"
-   });
+// GET
+app.get("/api/v1/content", userMiddleware, async (req, res) => {
+  const content = await ContentModel.find({ userId: req.userId }).populate(
+    "userId",
+    "username"
+  );
+  return res.json({ content });
 });
 
-app.delete("/api/v1/content", async (req, res) => {
-  const contentId = req.body.contentId; //check does he own the content
-  const content = await ContentModel.deleteMany({
-    contentId,
-    //@ts-ignore
-    userId: userId,
+// DELETE
+app.delete("/api/v1/content", userMiddleware, async (req, res) => {
+  const { contentId } = req.body;
+
+  const result = await ContentModel.deleteOne({
+    _id: contentId,
+    userId: req.userId,
   });
 
-  res.json({ message: "Content deleted" });
+  if (result.deletedCount === 0) {
+    return res.status(403).json({ message: "Not allowed" });
+  }
+
+  return res.json({ message: "Content deleted" });
 });
 
-app.delete("/api/v1/brain/share", async (req, res) => {
-  res.json({ message: "Share deleted" });
+/* ================== SHARE ================== */
+
+// CREATE SHARE LINK
+app.post("/api/v1/brain/share", userMiddleware, async (req, res) => {
+  const { contentId } = req.body;
+
+  const content = await ContentModel.findOne({
+    _id: contentId,
+    userId: req.userId,
+  });
+
+  if (!content) {
+    return res.status(403).json({ message: "Not authorized" });
+  }
+
+  const shareLink = Math.random().toString(36).substring(2, 10);
+
+  content.shareLink = shareLink;
+  await content.save();
+
+  return res.json({ shareLink });
 });
 
+// ACCESS SHARED CONTENT (PUBLIC)
 app.get("/api/v1/brain/share/:shareLink", async (req, res) => {
-  const shareLink = req.params.shareLink;
-  res.json({ message: "Shared link accessed", shareLink });
+  const { shareLink } = req.params;
+
+  const content = await ContentModel.findOne({ shareLink }).populate(
+    "userId",
+    "username"
+  );
+
+  if (!content) {
+    return res.status(404).json({ message: "Invalid link" });
+  }
+
+  return res.json({ content });
 });
 
-app.listen(3000);
+// DELETE SHARE LINK
+app.delete("/api/v1/brain/share", userMiddleware, async (req, res) => {
+  const { contentId } = req.body;
+
+  const content = await ContentModel.findOne({
+    _id: contentId,
+    userId: req.userId,
+  });
+
+  if (!content) {
+    return res.status(403).json({ message: "Not authorized" });
+  }
+
+  content.shareLink = null;
+  await content.save();
+
+  return res.json({ message: "Share removed" });
+});
+
+/* ================== SERVER ================== */
+
+app.listen(3000, () => {
+  console.log("Server running on port 3000");
+});
